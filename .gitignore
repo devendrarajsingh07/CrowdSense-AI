@@ -9,4 +9,6 @@ venv/
 
 .env
 
+uploads/
+
 Crowd_Report.pdf
