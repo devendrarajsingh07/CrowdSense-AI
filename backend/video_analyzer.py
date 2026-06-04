@@ -12,6 +12,9 @@ def analyze_video(video_path):
     frame_count = 0
     high_risk_events = 0
 
+    frame_skip = 10
+    current_frame = 0
+
     while True:
 
         success, frame = cap.read()
@@ -19,7 +22,17 @@ def analyze_video(video_path):
         if not success:
             break
 
-        results = model(frame, verbose=False)
+        current_frame += 1
+
+        if current_frame % frame_skip != 0:
+            continue
+
+        results = model(
+            frame,
+            verbose=False,
+            imgsz=320,
+            conf=0.4
+        )
 
         people_count = 0
 
@@ -57,13 +70,8 @@ def analyze_video(video_path):
 
     return {
 
-        "max_people":
-        max_people,
-
-        "average_people":
-        average_people,
-
-        "high_risk_events":
-        high_risk_events
+        "max_people": max_people,
+        "average_people": average_people,
+        "high_risk_events": high_risk_events
 
     }
