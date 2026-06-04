@@ -10,6 +10,7 @@ from backend.report_generator import generate_report
 
 import json
 import shutil
+import os
 
 app = FastAPI()
 
@@ -20,6 +21,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def home():
+
+    return {
+        "message": "CrowdSense AI API Running"
+    }
+
 
 @app.get("/crowd")
 def get_crowd_data():
@@ -64,31 +73,47 @@ def get_crowd_data():
 
         }
 
+
 @app.post("/analyze-video")
 async def analyze_uploaded_video(
     file: UploadFile = File(...)
 ):
 
-    file_path = (
-        "uploads/" +
-        file.filename
-    )
+    try:
 
-    with open(
-        file_path,
-        "wb"
-    ) as buffer:
-
-        shutil.copyfileobj(
-            file.file,
-            buffer
+        # Create uploads folder automatically
+        os.makedirs(
+            "uploads",
+            exist_ok=True
         )
 
-    result = analyze_video(
-        file_path
-    )
+        file_path = os.path.join(
+            "uploads",
+            file.filename
+        )
 
-    return result
+        with open(
+            file_path,
+            "wb"
+        ) as buffer:
+
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+        result = analyze_video(
+            file_path
+        )
+
+        return result
+
+    except Exception as e:
+
+        return {
+            "error": str(e)
+        }
+
 
 @app.get("/generate-report")
 def create_report():
@@ -101,12 +126,16 @@ def create_report():
         data = json.load(file)
 
     analytics = get_analytics()
+
     db_stats = get_database_analytics()
 
     data.update(analytics)
+
     data.update(db_stats)
 
-    filename = generate_report(data)
+    filename = generate_report(
+        data
+    )
 
     return FileResponse(
         filename,
