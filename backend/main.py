@@ -11,6 +11,7 @@ from backend.report_generator import generate_report
 import json
 import shutil
 import os
+import traceback
 
 app = FastAPI()
 
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 def home():
@@ -81,7 +83,10 @@ async def analyze_uploaded_video(
 
     try:
 
-        # Create uploads folder automatically
+        print("=" * 50)
+        print("VIDEO ANALYSIS STARTED")
+        print("=" * 50)
+
         os.makedirs(
             "uploads",
             exist_ok=True
@@ -91,6 +96,8 @@ async def analyze_uploaded_video(
             "uploads",
             file.filename
         )
+
+        print(f"Saving file to: {file_path}")
 
         with open(
             file_path,
@@ -102,15 +109,27 @@ async def analyze_uploaded_video(
                 buffer
             )
 
+        print("File saved successfully")
+
         result = analyze_video(
             file_path
         )
+
+        print("Analysis complete")
+        print(result)
 
         return result
 
     except Exception as e:
 
+        print("=" * 50)
+        print("VIDEO ANALYSIS ERROR")
+        print("=" * 50)
+
+        traceback.print_exc()
+
         return {
+            "success": False,
             "error": str(e)
         }
 
@@ -118,27 +137,35 @@ async def analyze_uploaded_video(
 @app.get("/generate-report")
 def create_report():
 
-    with open(
-        "crowd_data.json",
-        "r"
-    ) as file:
+    try:
 
-        data = json.load(file)
+        with open(
+            "crowd_data.json",
+            "r"
+        ) as file:
 
-    analytics = get_analytics()
+            data = json.load(file)
 
-    db_stats = get_database_analytics()
+        analytics = get_analytics()
 
-    data.update(analytics)
+        db_stats = get_database_analytics()
 
-    data.update(db_stats)
+        data.update(analytics)
+        data.update(db_stats)
 
-    filename = generate_report(
-        data
-    )
+        filename = generate_report(
+            data
+        )
 
-    return FileResponse(
-        filename,
-        media_type="application/pdf",
-        filename=filename
-    )
+        return FileResponse(
+            filename,
+            media_type="application/pdf",
+            filename=filename
+        )
+
+    except Exception as e:
+
+        return {
+            "success": False,
+            "error": str(e)
+        }
