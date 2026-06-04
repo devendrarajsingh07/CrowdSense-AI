@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CrowdSense AI</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="header">
+
+        <h1>🚀 CrowdSense AI</h1>
+
+        <p>
+            AI-Powered Crowd Monitoring & Analytics Platform
+        </p>
+
+    </div>
+
+    <div class="cards">
+
+        <div class="card">
+            <h3>People Count</h3>
+            <p id="people">0</p>
+        </div>
+
+        <div class="card">
+            <h3>Risk Level</h3>
+            <p id="risk">LOW</p>
+        </div>
+
+        <div class="card">
+            <h3>Detection Confidence</h3>
+            <p id="confidence">0%</p>
+        </div>
+
+        <div class="card">
+            <h3>Occupancy</h3>
+            <p id="occupancy">0%</p>
+        </div>
+
+        <div class="card">
+            <h3>Alert Status</h3>
+            <p id="alert">No Alert</p>
+        </div>
+
+        <div class="card">
+            <h3>Camera Status</h3>
+            <p id="camera">ONLINE</p>
+        </div>
+
+        <div class="card">
+            <h3>Peak Crowd</h3>
+            <p id="peak">0</p>
+        </div>
+
+        <div class="card">
+            <h3>Average Crowd</h3>
+            <p id="average">0</p>
+        </div>
+
+        <div class="card">
+            <h3>Total Records</h3>
+            <p id="records">0</p>
+        </div>
+
+        <div class="card">
+            <h3>Database Records</h3>
+            <p id="db_records">0</p>
+        </div>
+
+        <div class="card">
+            <h3>High Risk Events</h3>
+            <p id="high_risk">0</p>
+        </div>
+
+        <div class="card">
+            <h3>Average Occupancy</h3>
+            <p id="avg_occupancy">0%</p>
+        </div>
+
+    </div>
+
+    <!-- Live Crowd Chart -->
+
+    <div class="chart-card">
+
+        <h2>📈 Live Crowd Trend</h2>
+
+        <canvas id="crowdChart"></canvas>
+
+    </div>
+
+    <!-- Video Analyzer -->
+
+    <div class="chart-card">
+
+        <h2>🎥 Video Analyzer</h2>
+
+        <input
+            type="file"
+            id="videoFile"
+            accept=".mp4,.avi,.mov"
+        >
+
+        <button onclick="uploadVideo()">
+            Analyze Video
+        </button>
+
+        <div class="cards" style="margin-top:20px;">
+
+            <div class="card">
+                <h3>Maximum Crowd</h3>
+                <p id="max_people">0</p>
+            </div>
+
+            <div class="card">
+                <h3>Average Crowd</h3>
+                <p id="average_people">0</p>
+            </div>
+
+            <div class="card">
+                <h3>High Risk Events</h3>
+                <p id="video_risk">0</p>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- PDF Reports -->
+
+    <div class="chart-card">
+
+        <h2>📄 Reports</h2>
+
+        <button onclick="generateReport()">
+            Generate PDF Report
+        </button>
+
+    </div>
+
+    <div class="footer">
+
+        CrowdSense AI © 2026
+
+    </div>
+
+</div>
+
+<script src="script.js"></script>
+
+</body>
+
+</html>

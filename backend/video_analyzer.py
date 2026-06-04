@@ -1,0 +1,69 @@
+import cv2
+from ultralytics import YOLO
+
+model = YOLO("yolov8n.pt")
+
+def analyze_video(video_path):
+
+    cap = cv2.VideoCapture(video_path)
+
+    max_people = 0
+    total_people = 0
+    frame_count = 0
+    high_risk_events = 0
+
+    while True:
+
+        success, frame = cap.read()
+
+        if not success:
+            break
+
+        results = model(frame, verbose=False)
+
+        people_count = 0
+
+        for result in results:
+
+            for box in result.boxes:
+
+                if int(box.cls[0]) == 0:
+                    people_count += 1
+
+        max_people = max(
+            max_people,
+            people_count
+        )
+
+        total_people += people_count
+
+        frame_count += 1
+
+        if people_count >= 8:
+            high_risk_events += 1
+
+    cap.release()
+
+    if frame_count > 0:
+
+        average_people = round(
+            total_people / frame_count,
+            2
+        )
+
+    else:
+
+        average_people = 0
+
+    return {
+
+        "max_people":
+        max_people,
+
+        "average_people":
+        average_people,
+
+        "high_risk_events":
+        high_risk_events
+
+    }

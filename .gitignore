@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+crowd.db
+
+uploads/
+
+venv/
+
+.env
+
+Crowd_Report.pdf
