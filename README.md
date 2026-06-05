@@ -4,10 +4,6 @@ AI-Powered Crowd Monitoring & Analytics Platform
 
 ## Overview
 
-CrowdSense AI is a real-time crowd monitoring system built using YOLOv8, OpenCV, FastAPI, SQLite, HTML, CSS, JavaScript, and Chart.js.
-
-The platform detects people from live webcam feeds, analyzes crowd density, monitors occupancy, generates alerts, stores analytics, processes uploaded videos, and generates PDF reports.
-
 Developed and deployed an AI-powered crowd monitoring platform using YOLOv8, FastAPI, and JavaScript. Real-time analytics dashboard and reporting system were successfully deployed on Vercel and Render. Video inference requires higher-memory cloud infrastructure due to model resource requirements.
 
 ## Features
