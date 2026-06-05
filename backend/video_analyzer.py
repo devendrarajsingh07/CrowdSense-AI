@@ -1,18 +1,30 @@
+import os
 import cv2
 from ultralytics import YOLO
 
-model = YOLO("yolov8n.pt")
+MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "yolov8n.pt"
+)
+
+model = YOLO(MODEL_PATH)
 
 def analyze_video(video_path):
 
     cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+
+        return {
+            "error": "Unable to open video file"
+        }
 
     max_people = 0
     total_people = 0
     frame_count = 0
     high_risk_events = 0
 
-    frame_skip = 10
+    frame_skip = 15
     current_frame = 0
 
     while True:
@@ -27,35 +39,43 @@ def analyze_video(video_path):
         if current_frame % frame_skip != 0:
             continue
 
-        results = model(
-            frame,
-            verbose=False,
-            imgsz=320,
-            conf=0.4
-        )
+        try:
 
-        people_count = 0
+            results = model(
+                frame,
+                verbose=False,
+                imgsz=256,
+                conf=0.4
+            )
 
-        for result in results:
+            people_count = 0
 
-            for box in result.boxes:
+            for result in results:
 
-                if int(box.cls[0]) == 0:
-                    people_count += 1
+                for box in result.boxes:
 
-        max_people = max(
-            max_people,
-            people_count
-        )
+                    if int(box.cls[0]) == 0:
+                        people_count += 1
 
-        total_people += people_count
+            max_people = max(
+                max_people,
+                people_count
+            )
 
-        frame_count += 1
+            total_people += people_count
 
-        if people_count >= 8:
-            high_risk_events += 1
+            frame_count += 1
+
+            if people_count >= 8:
+                high_risk_events += 1
+
+        except Exception as e:
+
+            print("Frame processing error:", e)
 
     cap.release()
+
+    average_people = 0
 
     if frame_count > 0:
 
@@ -64,12 +84,9 @@ def analyze_video(video_path):
             2
         )
 
-    else:
-
-        average_people = 0
-
     return {
 
+        "success": True,
         "max_people": max_people,
         "average_people": average_people,
         "high_risk_events": high_risk_events
