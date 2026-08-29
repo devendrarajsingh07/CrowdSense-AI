@@ -1,67 +1,26 @@
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
-def get_database_analytics():
+from backend.database import initialize_database
+from backend.paths import DB_PATH
 
-    try:
 
-        conn = sqlite3.connect(
-            "crowd.db"
-        )
+def get_database_analytics(db_path=DB_PATH):
+    db_path = Path(db_path)
+    initialize_database(db_path)
 
-        cursor = conn.cursor()
+    with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+        total_records = conn.execute("SELECT COUNT(*) FROM crowd_logs").fetchone()[0]
+        high_risk_events = conn.execute(
+            "SELECT COUNT(*) FROM crowd_logs WHERE risk = 'HIGH'"
+        ).fetchone()[0]
+        avg_occupancy = conn.execute(
+            "SELECT AVG(occupancy) FROM crowd_logs"
+        ).fetchone()[0]
 
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM crowd_logs
-            """
-        )
-
-        total_records = cursor.fetchone()[0]
-
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM crowd_logs
-            WHERE risk='HIGH'
-            """
-        )
-
-        high_risk_events = cursor.fetchone()[0]
-
-        cursor.execute(
-            """
-            SELECT AVG(occupancy)
-            FROM crowd_logs
-            """
-        )
-
-        avg_occupancy = cursor.fetchone()[0]
-
-        if avg_occupancy is None:
-            avg_occupancy = 0
-
-        conn.close()
-
-        return {
-
-            "db_records":
-            total_records,
-
-            "high_risk":
-            high_risk_events,
-
-            "avg_occupancy":
-            round(avg_occupancy,2)
-
-        }
-
-    except:
-
-        return {
-
-            "db_records":0,
-            "high_risk":0,
-            "avg_occupancy":0
-
-        }
+    return {
+        "db_records": total_records,
+        "high_risk": high_risk_events,
+        "avg_occupancy": round(avg_occupancy or 0, 2),
+    }

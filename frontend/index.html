@@ -5,6 +5,8 @@
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Leave blank for same-origin API, or set a separate backend URL. -->
+    <meta name="crowdsense-api-base" content="">
 
     <title>CrowdSense AI</title>
 
@@ -57,7 +59,7 @@
 
         <div class="card">
             <h3>Camera Status</h3>
-            <p id="camera">ONLINE</p>
+            <p id="camera">CONNECTING</p>
         </div>
 
         <div class="card">
@@ -114,9 +116,11 @@
             accept=".mp4,.avi,.mov"
         >
 
-        <button onclick="uploadVideo()">
+        <button id="analyzeButton" type="button">
             Analyze Video
         </button>
+
+        <p id="video_status" class="status-message" role="status"></p>
 
         <div class="cards" style="margin-top:20px;">
 
@@ -145,7 +149,7 @@
 
         <h2>📄 Reports</h2>
 
-        <button onclick="generateReport()">
+        <button id="reportButton" type="button">
             Generate PDF Report
         </button>
 

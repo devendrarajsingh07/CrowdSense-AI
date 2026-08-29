@@ -1,87 +1,47 @@
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer
-)
+import os
+import tempfile
+from datetime import datetime
+from html import escape
 
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-from datetime import datetime
+
+def _line(label, value, style):
+    return Paragraph(f"{escape(label)}: {escape(str(value))}", style)
+
 
 def generate_report(data):
-
-    filename = "Crowd_Report.pdf"
-
-    doc = SimpleDocTemplate(filename)
-
-    styles = getSampleStyleSheet()
-
-    elements = []
-
-    elements.append(
-        Paragraph(
-            "CrowdSense AI Report",
-            styles["Title"]
-        )
+    descriptor, filename = tempfile.mkstemp(
+        prefix="crowdsense-report-",
+        suffix=".pdf",
     )
+    os.close(descriptor)
 
-    elements.append(
-        Spacer(1,12)
-    )
+    try:
+        doc = SimpleDocTemplate(filename)
+        styles = getSampleStyleSheet()
+        normal = styles["Normal"]
 
-    elements.append(
-        Paragraph(
-            f"Generated: {datetime.now()}",
-            styles["Normal"]
-        )
-    )
+        elements = [
+            Paragraph("CrowdSense AI Report", styles["Title"]),
+            Spacer(1, 12),
+            _line("Generated", datetime.now().astimezone().isoformat(), normal),
+            Spacer(1, 12),
+            _line("Camera Status", data.get("camera", "UNKNOWN"), normal),
+            _line("Current People Count", data.get("people", 0), normal),
+            _line("Peak Crowd", data.get("peak", 0), normal),
+            _line("Average Crowd", data.get("average", 0), normal),
+            _line("Occupancy", f"{data.get('occupancy', 0)}%", normal),
+            _line("High Risk Events", data.get("high_risk", 0), normal),
+            _line("Database Records", data.get("db_records", 0), normal),
+        ]
 
-    elements.append(
-        Spacer(1,12)
-    )
-
-    elements.append(
-        Paragraph(
-            f"Current People Count: {data['people']}",
-            styles["Normal"]
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            f"Peak Crowd: {data['peak']}",
-            styles["Normal"]
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            f"Average Crowd: {data['average']}",
-            styles["Normal"]
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            f"Occupancy: {data['occupancy']}%",
-            styles["Normal"]
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            f"High Risk Events: {data['high_risk']}",
-            styles["Normal"]
-        )
-    )
-
-    elements.append(
-        Paragraph(
-            f"Database Records: {data['db_records']}",
-            styles["Normal"]
-        )
-    )
-
-    doc.build(elements)
-
-    return filename
+        doc.build(elements)
+        return filename
+    except Exception:
+        try:
+            os.unlink(filename)
+        except FileNotFoundError:
+            pass
+        raise

@@ -1,171 +1,231 @@
-from fastapi import FastAPI
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from backend.analytics import get_analytics
+from backend.database import initialize_database
 from backend.db_analytics import get_database_analytics
-from backend.video_analyzer import analyze_video
+from backend.paths import DATA_DIR, FRONTEND_DIR, UPLOAD_DIR
 from backend.report_generator import generate_report
+from backend.state import read_crowd_state
+from backend.upload_utils import allocate_upload_path
+from backend.video_analyzer import analyze_video
 
-import json
-import shutil
-import os
-import traceback
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
 
+MAX_UPLOAD_BYTES = int(os.getenv("CROWDSENSE_MAX_UPLOAD_MB", "100")) * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+VIDEO_SLOT_TIMEOUT_SECONDS = 0.25
+video_analysis_slot = asyncio.Semaphore(1)
+
+
+class UploadTooLarge(Exception):
+    pass
+
+
+class UploadSizeLimitMiddleware:
+    """Enforce the request limit before multipart parsing, including chunked bodies."""
+
+    def __init__(self, app, max_request_bytes):
+        self.app = app
+        self.max_request_bytes = max_request_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path") != "/analyze-video":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        content_length = headers.get(b"content-length")
+
+        if content_length:
+            try:
+                declared_bytes = int(content_length)
+            except ValueError:
+                response = JSONResponse(
+                    status_code=400,
+                    content={"detail": "Invalid Content-Length"},
+                )
+                await response(scope, receive, send)
+                return
+
+            if declared_bytes > self.max_request_bytes:
+                await self._reject(scope, receive, send)
+                return
+
+        received_bytes = 0
+
+        async def limited_receive():
+            nonlocal received_bytes
+            message = await receive()
+
+            if message["type"] == "http.request":
+                received_bytes += len(message.get("body", b""))
+                if received_bytes > self.max_request_bytes:
+                    raise UploadTooLarge
+
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except UploadTooLarge:
+            await self._reject(scope, receive, send)
+
+    async def _reject(self, scope, receive, send):
+        response = JSONResponse(
+            status_code=413,
+            content={
+                "detail": f"Video exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"
+            },
+        )
+        await response(scope, receive, send)
+
+
+def _allowed_origins():
+    configured = os.getenv("CROWDSENSE_ALLOWED_ORIGINS", "*")
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
+def _delete_file(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+async def _save_bounded_upload(upload, destination):
+    bytes_written = 0
+
+    try:
+        with destination.open("wb") as output:
+            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                bytes_written += len(chunk)
+                if bytes_written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Video exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit",
+                    )
+                output.write(chunk)
+    finally:
+        await upload.close()
+
+    if bytes_written == 0:
+        raise HTTPException(status_code=400, detail="The uploaded video is empty")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+origins = _allowed_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_credentials="*" not in origins,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    UploadSizeLimitMiddleware,
+    max_request_bytes=MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
 )
 
 
 @app.get("/")
 def home():
-
     return {
-        "message": "CrowdSense AI API Running"
+        "message": "CrowdSense AI API Running",
+        "dashboard": "/dashboard/",
     }
 
 
 @app.get("/crowd")
 def get_crowd_data():
-
-    try:
-
-        with open(
-            "crowd_data.json",
-            "r"
-        ) as file:
-
-            data = json.load(file)
-
-        analytics = get_analytics()
-
-        db_stats = get_database_analytics()
-
-        data.update(analytics)
-        data.update(db_stats)
-
-        return data
-
-    except Exception as e:
-
-        return {
-
-            "people": 0,
-            "risk": "LOW",
-            "confidence": 0,
-            "occupancy": 0,
-            "alert": "No Alert",
-
-            "peak": 0,
-            "average": 0,
-            "records": 0,
-
-            "db_records": 0,
-            "high_risk": 0,
-            "avg_occupancy": 0,
-
-            "error": str(e)
-
-        }
+    data = read_crowd_state()
+    data.update(get_analytics())
+    data.update(get_database_analytics())
+    return data
 
 
 @app.post("/analyze-video")
-async def analyze_uploaded_video(
-    file: UploadFile = File(...)
-):
+async def analyze_uploaded_video(file: UploadFile = File(...)):
+    try:
+        destination = allocate_upload_path(UPLOAD_DIR, file.filename)
+    except ValueError as error:
+        await file.close()
+        raise HTTPException(status_code=415, detail=str(error)) from error
 
     try:
-
-        print("=" * 50)
-        print("VIDEO ANALYSIS STARTED")
-        print("=" * 50)
-
-        os.makedirs(
-            "uploads",
-            exist_ok=True
+        await asyncio.wait_for(
+            video_analysis_slot.acquire(),
+            timeout=VIDEO_SLOT_TIMEOUT_SECONDS,
         )
+    except TimeoutError as error:
+        await file.close()
+        raise HTTPException(
+            status_code=429,
+            detail="Another video is currently being analyzed. Try again shortly.",
+        ) from error
 
-        file_path = os.path.join(
-            "uploads",
-            file.filename
-        )
+    try:
+        await _save_bounded_upload(file, destination)
+        result = await run_in_threadpool(analyze_video, destination)
 
-        print(f"Saving file to: {file_path}")
-
-        with open(
-            file_path,
-            "wb"
-        ) as buffer:
-
-            shutil.copyfileobj(
-                file.file,
-                buffer
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=422,
+                detail=result.get("error", "Video analysis failed"),
             )
 
-        print("File saved successfully")
-
-        result = analyze_video(
-            file_path
-        )
-
-        print("Analysis complete")
-        print(result)
-
         return result
-
-    except Exception as e:
-
-        print("=" * 50)
-        print("VIDEO ANALYSIS ERROR")
-        print("=" * 50)
-
-        traceback.print_exc()
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Video analysis failed")
+        raise HTTPException(status_code=500, detail="Video analysis failed") from error
+    finally:
+        _delete_file(destination)
+        video_analysis_slot.release()
 
 
 @app.get("/generate-report")
 def create_report():
-
     try:
+        data = read_crowd_state()
+        data.update(get_analytics())
+        data.update(get_database_analytics())
+        filename = generate_report(data)
+    except Exception as error:
+        logger.exception("Report generation failed")
+        raise HTTPException(status_code=500, detail="Report generation failed") from error
 
-        with open(
-            "crowd_data.json",
-            "r"
-        ) as file:
+    return FileResponse(
+        filename,
+        media_type="application/pdf",
+        filename="Crowd_Report.pdf",
+        background=BackgroundTask(_delete_file, filename),
+    )
 
-            data = json.load(file)
 
-        analytics = get_analytics()
-
-        db_stats = get_database_analytics()
-
-        data.update(analytics)
-        data.update(db_stats)
-
-        filename = generate_report(
-            data
-        )
-
-        return FileResponse(
-            filename,
-            media_type="application/pdf",
-            filename=filename
-        )
-
-    except Exception as e:
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
+if FRONTEND_DIR.is_dir():
+    app.mount(
+        "/dashboard",
+        StaticFiles(directory=str(FRONTEND_DIR), html=True),
+        name="dashboard",
+    )

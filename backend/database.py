@@ -1,70 +1,46 @@
 import sqlite3
-import os
+from contextlib import closing
+from pathlib import Path
 
-DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "crowd.db"
+from backend.paths import DB_PATH
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS crowd_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    people_count INTEGER NOT NULL,
+    risk TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    occupancy REAL NOT NULL
 )
+"""
 
-def initialize_database():
+def initialize_database(db_path=DB_PATH):
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
-
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS crowd_logs (
-
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-        timestamp TEXT,
-
-        people_count INTEGER,
-
-        risk TEXT,
-
-        confidence REAL,
-
-        occupancy REAL
-
-    )
-    """)
-
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+        with conn:
+            conn.execute(SCHEMA)
 
 def insert_record(
     timestamp,
     people_count,
     risk,
     confidence,
-    occupancy
+    occupancy,
+    db_path=DB_PATH,
 ):
+    initialize_database(db_path)
 
-    conn = sqlite3.connect(DB_PATH)
-
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        INSERT INTO crowd_logs
-        (
-            timestamp,
-            people_count,
-            risk,
-            confidence,
-            occupancy
-        )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            timestamp,
-            people_count,
-            risk,
-            confidence,
-            occupancy
-        )
-    )
-
-    conn.commit()
-    conn.close()
+    with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO crowd_logs
+                (timestamp, people_count, risk, confidence, occupancy)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (timestamp, people_count, risk, confidence, occupancy),
+            )

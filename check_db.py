@@ -1,16 +1,14 @@
 import sqlite3
+from contextlib import closing
 
-conn = sqlite3.connect("crowd.db")
+from backend.database import initialize_database
+from backend.paths import DB_PATH
 
-cursor = conn.cursor()
 
-cursor.execute(
-    "SELECT * FROM crowd_logs LIMIT 10"
-)
+initialize_database()
 
-rows = cursor.fetchall()
+with closing(sqlite3.connect(DB_PATH)) as conn:
+    rows = conn.execute("SELECT * FROM crowd_logs LIMIT 10").fetchall()
 
 for row in rows:
     print(row)
-
-conn.close()

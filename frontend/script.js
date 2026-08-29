@@ -1,207 +1,184 @@
 const labels = [];
 const crowdValues = [];
 
-const ctx = document.getElementById("crowdChart");
+const configuredApiBase = document
+    .querySelector('meta[name="crowdsense-api-base"]')
+    ?.content.trim();
 
-const crowdChart = new Chart(ctx, {
-    type: "line",
+const API_BASE = (
+    configuredApiBase ||
+    (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "")
+).replace(/\/$/, "");
 
-    data: {
-        labels: labels,
-        datasets: [
-            {
-                label: "People Count",
-                data: crowdValues,
-                borderWidth: 3,
-                tension: 0.3
-            }
-        ]
-    },
-
-    options: {
-        responsive: true
-    }
-});
-
-async function loadData() {
-
-    try {
-
-        const response = await fetch(
-            "https://crowdsense-ai-zy08.onrender.com/crowd"
-        );
-
-        const data = await response.json();
-
-        document.getElementById("people").innerText =
-            data.people;
-
-        document.getElementById("risk").innerText =
-            data.risk;
-
-        document.getElementById("confidence").innerText =
-            data.confidence + "%";
-
-        document.getElementById("occupancy").innerText =
-            data.occupancy + "%";
-
-        document.getElementById("alert").innerText =
-            data.alert;
-
-        document.getElementById("peak").innerText =
-            data.peak;
-
-        document.getElementById("average").innerText =
-            data.average;
-
-        document.getElementById("records").innerText =
-            data.records;
-
-        document.getElementById("db_records").innerText =
-            data.db_records;
-
-        document.getElementById("high_risk").innerText =
-            data.high_risk;
-
-        document.getElementById("avg_occupancy").innerText =
-            data.avg_occupancy + "%";
-
-        const riskElement =
-            document.getElementById("risk");
-
-        if (data.risk === "LOW") {
-
-            riskElement.style.color = "lime";
-
-        } else if (data.risk === "MEDIUM") {
-
-            riskElement.style.color = "orange";
-
-        } else {
-
-            riskElement.style.color = "red";
-
-        }
-
-        const alertElement =
-            document.getElementById("alert");
-
-        if (data.alert === "HIGH CROWD DETECTED") {
-
-            alertElement.style.color = "red";
-
-        } else {
-
-            alertElement.style.color = "lime";
-
-        }
-
-        const currentTime =
-            new Date().toLocaleTimeString();
-
-        labels.push(currentTime);
-
-        crowdValues.push(data.people);
-
-        if (labels.length > 15) {
-
-            labels.shift();
-            crowdValues.shift();
-
-        }
-
-        crowdChart.update();
-
-    } catch (error) {
-
-        console.error(
-            "Error loading data:",
-            error
-        );
-
-    }
-
+function apiUrl(path) {
+    return `${API_BASE}${path}`;
 }
 
-loadData();
+function setText(id, value) {
+    document.getElementById(id).innerText = value;
+}
 
-setInterval(
-    loadData,
-    2000
-);
+async function errorMessage(response) {
+    try {
+        const payload = await response.json();
+        return payload.detail || payload.error || `Request failed (${response.status})`;
+    } catch (_error) {
+        return `Request failed (${response.status})`;
+    }
+}
 
-async function uploadVideo() {
+const chartElement = document.getElementById("crowdChart");
+const crowdChart = typeof Chart === "undefined"
+    ? null
+    : new Chart(chartElement, {
+        type: "line",
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: "People Count",
+                    data: crowdValues,
+                    borderWidth: 3,
+                    tension: 0.3,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+        },
+    });
 
-    const fileInput =
-        document.getElementById("videoFile");
+function showOfflineState(message = "API Unavailable") {
+    setText("people", "--");
+    setText("risk", "UNKNOWN");
+    setText("confidence", "--");
+    setText("occupancy", "--");
+    setText("alert", message);
+    setText("camera", "OFFLINE");
 
-    const file =
-        fileInput.files[0];
+    document.getElementById("risk").style.color = "#94a3b8";
+    document.getElementById("alert").style.color = "red";
+    document.getElementById("camera").style.color = "red";
+}
 
-    if (!file) {
+let loadingDashboard = false;
 
-        alert(
-            "Please select a video file."
-        );
-
+async function loadData() {
+    if (loadingDashboard) {
         return;
-
     }
 
-    const formData =
-        new FormData();
-
-    formData.append(
-        "file",
-        file
-    );
+    loadingDashboard = true;
 
     try {
+        const response = await fetch(apiUrl("/crowd"));
 
-        const response =
-            await fetch(
-                "https://crowdsense-ai-zy08.onrender.com/analyze-video",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
+        if (!response.ok) {
+            throw new Error(await errorMessage(response));
+        }
 
-        const result =
-            await response.json();
+        const data = await response.json();
+        const cameraOnline = data.camera === "ONLINE";
 
-        document.getElementById(
-            "max_people"
-        ).innerText =
-            result.max_people;
+        setText("people", cameraOnline ? data.people : "--");
+        setText("risk", cameraOnline ? data.risk : "UNKNOWN");
+        setText("confidence", cameraOnline ? `${data.confidence}%` : "--");
+        setText("occupancy", cameraOnline ? `${data.occupancy}%` : "--");
+        setText("alert", data.alert);
+        setText("camera", data.camera);
+        setText("peak", data.peak);
+        setText("average", data.average);
+        setText("records", data.records);
+        setText("db_records", data.db_records);
+        setText("high_risk", data.high_risk);
+        setText("avg_occupancy", `${data.avg_occupancy}%`);
 
-        document.getElementById(
-            "average_people"
-        ).innerText =
-            result.average_people;
+        const riskElement = document.getElementById("risk");
+        const riskColors = {
+            LOW: "lime",
+            MEDIUM: "orange",
+            HIGH: "red",
+        };
+        riskElement.style.color = riskColors[data.risk] || "#94a3b8";
 
-        document.getElementById(
-            "video_risk"
-        ).innerText =
-            result.high_risk_events;
+        const alertElement = document.getElementById("alert");
+        alertElement.style.color = data.alert === "No Alert" ? "lime" : "red";
 
+        const cameraElement = document.getElementById("camera");
+        cameraElement.style.color = cameraOnline ? "lime" : "red";
+
+        if (cameraOnline) {
+            labels.push(new Date().toLocaleTimeString());
+            crowdValues.push(data.people);
+
+            if (labels.length > 15) {
+                labels.shift();
+                crowdValues.shift();
+            }
+
+            crowdChart?.update();
+        }
     } catch (error) {
+        console.error("Error loading dashboard data:", error);
+        showOfflineState(error.message);
+    } finally {
+        loadingDashboard = false;
+    }
+}
 
-        console.error(error);
+async function uploadVideo() {
+    const fileInput = document.getElementById("videoFile");
+    const button = document.getElementById("analyzeButton");
+    const status = document.getElementById("video_status");
+    const file = fileInput.files[0];
 
-        alert(
-            "Video analysis failed."
-        );
-
+    if (!file) {
+        status.innerText = "Please select a video file.";
+        status.className = "status-message error";
+        return;
     }
 
+    const formData = new FormData();
+    formData.append("file", file);
+    button.disabled = true;
+    status.innerText = "Analyzing video…";
+    status.className = "status-message";
+
+    try {
+        const response = await fetch(apiUrl("/analyze-video"), {
+            method: "POST",
+            body: formData,
+        });
+
+        if (!response.ok) {
+            throw new Error(await errorMessage(response));
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || "Video analysis failed");
+        }
+
+        setText("max_people", result.max_people);
+        setText("average_people", result.average_people);
+        setText("video_risk", result.high_risk_events);
+        status.innerText = "Analysis complete.";
+        status.className = "status-message success";
+    } catch (error) {
+        console.error("Video analysis failed:", error);
+        status.innerText = error.message;
+        status.className = "status-message error";
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function generateReport() {
-
-    window.open(
-        "https://crowdsense-ai-zy08.onrender.com/generate-report",
-        "_blank"
-    );
-
+    window.open(apiUrl("/generate-report"), "_blank", "noopener");
 }
+
+document.getElementById("analyzeButton").addEventListener("click", uploadVideo);
+document.getElementById("reportButton").addEventListener("click", generateReport);
+
+loadData();
+setInterval(loadData, 2000);

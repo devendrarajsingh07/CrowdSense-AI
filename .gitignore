@@ -8,6 +8,7 @@ uploads/
 venv/
 
 .env
+.test-deps/
 
 uploads/
 

@@ -1,243 +1,166 @@
-import cv2
-import json
-import csv
 import time
-
 from datetime import datetime
+
+import cv2
 from ultralytics import YOLO
 
-from backend.database import insert_record
+from backend.database import initialize_database, insert_record
+from backend.history import append_history_record
+from backend.paths import MODEL_PATH
+from backend.state import DEFAULT_STATE, write_crowd_state
 
-# Load YOLO Model
-model = YOLO("yolov8n.pt")
 
-# Maximum Capacity
 MAX_CAPACITY = 20
+HIGH_RISK_THRESHOLD = 8
+LOG_INTERVAL_SECONDS = 5
 
-# Log every 5 seconds
-last_log_time = 0
 
-# Webcam
-cap = cv2.VideoCapture(0)
-
-while True:
-
-    success, frame = cap.read()
-
-    if not success:
-        break
-
-    results = model(frame, verbose=False)
-
-    people_count = 0
-    confidence_sum = 0
-
-    for result in results:
-
-        for box in result.boxes:
-
-            cls = int(box.cls[0])
-
-            if cls == 0:
-
-                people_count += 1
-
-                confidence = float(box.conf[0])
-
-                confidence_sum += confidence
-
-                x1, y1, x2, y2 = map(
-                    int,
-                    box.xyxy[0]
-                )
-
-                cv2.rectangle(
-                    frame,
-                    (x1, y1),
-                    (x2, y2),
-                    (0, 255, 0),
-                    2
-                )
-
-                cv2.putText(
-                    frame,
-                    f"{confidence:.2f}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2
-                )
-
-    # Average Confidence
-
-    if people_count > 0:
-
-        avg_confidence = round(
-            (confidence_sum / people_count) * 100,
-            2
-        )
-
+def _crowd_state(people_count, confidence_sum):
+    if people_count:
+        average_confidence = round((confidence_sum / people_count) * 100, 2)
     else:
-
-        avg_confidence = 0
-
-    # Risk Level
+        average_confidence = 0
 
     if people_count < 3:
-
-        level = "LOW"
-
-    elif people_count < 8:
-
-        level = "MEDIUM"
-
+        risk = "LOW"
+    elif people_count < HIGH_RISK_THRESHOLD:
+        risk = "MEDIUM"
     else:
+        risk = "HIGH"
 
-        level = "HIGH"
+    occupancy = min(round((people_count / MAX_CAPACITY) * 100, 2), 100)
+    alert = "HIGH CROWD DETECTED" if risk == "HIGH" else "No Alert"
 
-    # Occupancy %
-
-    occupancy = round(
-        (people_count / MAX_CAPACITY) * 100,
-        2
-    )
-
-    # Alert
-
-    if people_count >= 8:
-
-        alert = "HIGH CROWD DETECTED"
-
-    else:
-
-        alert = "No Alert"
-
-    # Dashboard JSON
-
-    data = {
-
+    return {
         "people": people_count,
-        "risk": level,
-        "confidence": avg_confidence,
+        "risk": risk,
+        "confidence": average_confidence,
         "occupancy": occupancy,
-        "alert": alert
-
+        "alert": alert,
     }
 
-    with open(
-        "crowd_data.json",
-        "w"
-    ) as file:
 
-        json.dump(
-            data,
-            file
-        )
+def run_detector(camera_index=0):
+    initialize_database()
+    model = YOLO(str(MODEL_PATH))
+    cap = cv2.VideoCapture(camera_index)
+    last_log_time = 0
 
-    timestamp = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    if not cap.isOpened():
+        write_crowd_state(DEFAULT_STATE, camera="OFFLINE")
+        raise RuntimeError(f"Unable to open camera {camera_index}")
 
-    # Log every 5 seconds
+    try:
+        while True:
+            success, frame = cap.read()
 
-    current_time = time.time()
+            if not success:
+                break
 
-    if current_time - last_log_time >= 5:
+            results = model(frame, verbose=False)
+            people_count = 0
+            confidence_sum = 0
 
-        # CSV Logging
+            for result in results:
+                for box in result.boxes:
+                    if int(box.cls[0]) != 0:
+                        continue
 
-        with open(
-            "data/crowd_history.csv",
-            "a",
-            newline=""
-        ) as csvfile:
+                    people_count += 1
+                    confidence = float(box.conf[0])
+                    confidence_sum += confidence
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            writer = csv.writer(
-                csvfile
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(
+                        frame,
+                        f"{confidence:.2f}",
+                        (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        2,
+                    )
+
+            state = _crowd_state(people_count, confidence_sum)
+            write_crowd_state(state)
+
+            current_time = time.monotonic()
+            if current_time - last_log_time >= LOG_INTERVAL_SECONDS:
+                timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+                append_history_record(
+                    timestamp,
+                    state["people"],
+                    state["risk"],
+                    state["confidence"],
+                    state["occupancy"],
+                )
+                insert_record(
+                    timestamp,
+                    state["people"],
+                    state["risk"],
+                    state["confidence"],
+                    state["occupancy"],
+                )
+                last_log_time = current_time
+
+            cv2.putText(
+                frame,
+                f"People: {state['people']}",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"Risk: {state['risk']}",
+                (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 255),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"Confidence: {state['confidence']}%",
+                (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 0),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"Occupancy: {state['occupancy']}%",
+                (20, 160),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 255),
+                2,
             )
 
-            writer.writerow([
-                timestamp,
-                people_count,
-                level,
-                avg_confidence,
-                occupancy
-            ])
+            if state["alert"] == "HIGH CROWD DETECTED":
+                cv2.putText(
+                    frame,
+                    state["alert"],
+                    (20, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 0, 255),
+                    2,
+                )
 
-        # SQLite Logging
+            cv2.imshow("CrowdSense AI", frame)
 
-        insert_record(
-            timestamp,
-            people_count,
-            level,
-            avg_confidence,
-            occupancy
-        )
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        write_crowd_state(DEFAULT_STATE, camera="OFFLINE")
 
-        last_log_time = current_time
 
-    # Display Information
-
-    cv2.putText(
-        frame,
-        f"People: {people_count}",
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (0, 255, 0),
-        2
-    )
-
-    cv2.putText(
-        frame,
-        f"Risk: {level}",
-        (20, 80),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (0, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        frame,
-        f"Confidence: {avg_confidence}%",
-        (20, 120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 0),
-        2
-    )
-
-    cv2.putText(
-        frame,
-        f"Occupancy: {occupancy}%",
-        (20, 160),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 0, 255),
-        2
-    )
-
-    if alert == "HIGH CROWD DETECTED":
-
-        cv2.putText(
-            frame,
-            alert,
-            (20, 200),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 0, 255),
-            2
-        )
-
-    cv2.imshow(
-        "CrowdSense AI",
-        frame
-    )
-
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    run_detector()
