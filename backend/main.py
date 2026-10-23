@@ -64,21 +64,37 @@ class UploadSizeLimitMiddleware:
                 return
 
         received_bytes = 0
+        limit_exceeded = False
+        response_started = False
 
         async def limited_receive():
-            nonlocal received_bytes
+            nonlocal received_bytes, limit_exceeded
             message = await receive()
 
             if message["type"] == "http.request":
                 received_bytes += len(message.get("body", b""))
                 if received_bytes > self.max_request_bytes:
+                    limit_exceeded = True
                     raise UploadTooLarge
 
             return message
 
+        async def guarded_send(message):
+            nonlocal response_started
+            # FastAPI converts body-parsing exceptions into a generic 400.
+            # Once the limit is hit, drop that response and send a 413 instead.
+            if limit_exceeded:
+                return
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            await self.app(scope, limited_receive, send)
+            await self.app(scope, limited_receive, guarded_send)
         except UploadTooLarge:
+            pass
+
+        if limit_exceeded and not response_started:
             await self._reject(scope, receive, send)
 
     async def _reject(self, scope, receive, send):
@@ -134,16 +150,18 @@ async def lifespan(_app):
 app = FastAPI(lifespan=lifespan)
 
 origins = _allowed_origins()
+# Middleware added last runs first. CORS must wrap the upload limiter so that
+# 413 responses still carry CORS headers and the browser can read the error.
+app.add_middleware(
+    UploadSizeLimitMiddleware,
+    max_request_bytes=MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials="*" not in origins,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
-)
-app.add_middleware(
-    UploadSizeLimitMiddleware,
-    max_request_bytes=MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
 )
 
 
@@ -176,7 +194,7 @@ async def analyze_uploaded_video(file: UploadFile = File(...)):
             video_analysis_slot.acquire(),
             timeout=VIDEO_SLOT_TIMEOUT_SECONDS,
         )
-    except TimeoutError as error:
+    except asyncio.TimeoutError as error:
         await file.close()
         raise HTTPException(
             status_code=429,

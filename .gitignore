@@ -6,10 +6,9 @@ crowd.db
 uploads/
 
 venv/
+.venv/
 
 .env
 .test-deps/
-
-uploads/
 
 Crowd_Report.pdf

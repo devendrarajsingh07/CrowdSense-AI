@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import datetime
 
@@ -13,6 +14,18 @@ from backend.state import DEFAULT_STATE, write_crowd_state
 MAX_CAPACITY = 20
 HIGH_RISK_THRESHOLD = 8
 LOG_INTERVAL_SECONDS = 5
+STATE_WRITE_INTERVAL_SECONDS = 0.5
+MAX_CONSECUTIVE_READ_FAILURES = 30
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_write_state(state, camera="ONLINE"):
+    """A failed state write must not stop the detector."""
+    try:
+        write_crowd_state(state, camera=camera)
+    except OSError:
+        logger.warning("Could not write crowd state", exc_info=True)
 
 
 def _crowd_state(people_count, confidence_sum):
@@ -44,10 +57,13 @@ def run_detector(camera_index=0):
     initialize_database()
     model = YOLO(str(MODEL_PATH))
     cap = cv2.VideoCapture(camera_index)
-    last_log_time = 0
+    last_log_time = float("-inf")
+    last_state_write = float("-inf")
+    consecutive_read_failures = 0
 
     if not cap.isOpened():
-        write_crowd_state(DEFAULT_STATE, camera="OFFLINE")
+        cap.release()
+        _safe_write_state(DEFAULT_STATE, camera="OFFLINE")
         raise RuntimeError(f"Unable to open camera {camera_index}")
 
     try:
@@ -55,7 +71,15 @@ def run_detector(camera_index=0):
             success, frame = cap.read()
 
             if not success:
-                break
+                # Webcams occasionally drop a frame; only stop on a real outage.
+                consecutive_read_failures += 1
+                if consecutive_read_failures >= MAX_CONSECUTIVE_READ_FAILURES:
+                    logger.error("Camera stopped returning frames")
+                    break
+                time.sleep(0.05)
+                continue
+
+            consecutive_read_failures = 0
 
             results = model(frame, verbose=False)
             people_count = 0
@@ -83,25 +107,33 @@ def run_detector(camera_index=0):
                     )
 
             state = _crowd_state(people_count, confidence_sum)
-            write_crowd_state(state)
-
             current_time = time.monotonic()
+
+            # The dashboard polls every 2 s; writing every frame only adds
+            # disk churn (and file-lock collisions on Windows/OneDrive).
+            if current_time - last_state_write >= STATE_WRITE_INTERVAL_SECONDS:
+                _safe_write_state(state)
+                last_state_write = current_time
+
             if current_time - last_log_time >= LOG_INTERVAL_SECONDS:
                 timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
-                append_history_record(
-                    timestamp,
-                    state["people"],
-                    state["risk"],
-                    state["confidence"],
-                    state["occupancy"],
-                )
-                insert_record(
-                    timestamp,
-                    state["people"],
-                    state["risk"],
-                    state["confidence"],
-                    state["occupancy"],
-                )
+                try:
+                    append_history_record(
+                        timestamp,
+                        state["people"],
+                        state["risk"],
+                        state["confidence"],
+                        state["occupancy"],
+                    )
+                    insert_record(
+                        timestamp,
+                        state["people"],
+                        state["risk"],
+                        state["confidence"],
+                        state["occupancy"],
+                    )
+                except Exception:
+                    logger.warning("Could not log crowd history", exc_info=True)
                 last_log_time = current_time
 
             cv2.putText(
@@ -159,8 +191,9 @@ def run_detector(camera_index=0):
     finally:
         cap.release()
         cv2.destroyAllWindows()
-        write_crowd_state(DEFAULT_STATE, camera="OFFLINE")
+        _safe_write_state(DEFAULT_STATE, camera="OFFLINE")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     run_detector()

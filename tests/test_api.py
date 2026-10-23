@@ -111,6 +111,44 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(sent_messages[0]["status"], 413)
 
+    def test_chunked_oversized_upload_returns_413_through_the_real_app(self):
+        boundary = "crowdsense"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="big.mp4"\r\n'
+            "Content-Type: video/mp4\r\n\r\n"
+        ).encode() + b"x" * (MAX_UPLOAD_BYTES + 2 * 1024 * 1024) + (
+            f"\r\n--{boundary}--\r\n"
+        ).encode()
+
+        def chunks():
+            for start in range(0, len(body), 1024 * 1024):
+                yield body[start:start + 1024 * 1024]
+
+        with patch("backend.main.analyze_video") as analyzer:
+            response = self.client.post(
+                "/analyze-video",
+                content=chunks(),
+                headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("limit", response.json()["detail"])
+        analyzer.assert_not_called()
+
+    def test_rejected_upload_still_has_cors_headers(self):
+        response = self.client.post(
+            "/analyze-video",
+            content=b"ignored",
+            headers={
+                "content-length": str(MAX_UPLOAD_BYTES + 2 * 1024 * 1024),
+                "origin": "https://crowdsense.example",
+            },
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "*")
+
     def test_report_is_a_pdf(self):
         response = self.client.get("/generate-report")
 

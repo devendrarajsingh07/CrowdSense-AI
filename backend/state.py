@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,9 @@ DEFAULT_STATE = {
     "camera": "OFFLINE",
     "updated_at": None,
 }
+
+REPLACE_ATTEMPTS = 10
+REPLACE_RETRY_DELAY_SECONDS = 0.02
 
 
 def _offline_state(updated_at=None):
@@ -44,14 +48,26 @@ def write_crowd_state(data, path=STATE_PATH, camera="ONLINE"):
     try:
         with temporary_path.open("w", encoding="utf-8") as state_file:
             json.dump(payload, state_file)
-            state_file.flush()
-            os.fsync(state_file.fileno())
 
-        os.replace(temporary_path, path)
+        _replace_with_retry(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
 
     return payload
+
+
+def _replace_with_retry(source, destination, attempts=REPLACE_ATTEMPTS):
+    """On Windows, os.replace fails while another process (the API server,
+    OneDrive, antivirus) briefly holds the destination open. Retry instead of
+    crashing the detector."""
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(REPLACE_RETRY_DELAY_SECONDS)
 
 
 def read_crowd_state(path=STATE_PATH, max_age_seconds=10):

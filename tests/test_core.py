@@ -1,11 +1,13 @@
 import csv
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.analytics import get_analytics
 from backend.database import insert_record
@@ -46,6 +48,25 @@ class StateTests(unittest.TestCase):
 
             self.assertEqual(state["camera"], "ONLINE")
             self.assertEqual(state["people"], 3)
+
+    def test_state_write_retries_when_file_is_briefly_locked(self):
+        real_replace = os.replace
+        calls = []
+
+        def flaky_replace(source, destination):
+            calls.append(destination)
+            if len(calls) < 3:
+                raise PermissionError("file in use")
+            return real_replace(source, destination)
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            with patch("backend.state.os.replace", side_effect=flaky_replace):
+                write_crowd_state({"people": 4}, state_path)
+
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(read_crowd_state(state_path)["people"], 4)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 
     def test_stale_state_is_reported_offline(self):
         with tempfile.TemporaryDirectory() as directory:

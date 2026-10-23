@@ -5,10 +5,32 @@ const configuredApiBase = document
     .querySelector('meta[name="crowdsense-api-base"]')
     ?.content.trim();
 
-const API_BASE = (
-    configuredApiBase ||
-    (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "")
-).replace(/\/$/, "");
+// Deployed backend used when the dashboard is hosted on its own (e.g. Vercel).
+const DEFAULT_REMOTE_API = "https://crowdsense-ai-zy08.onrender.com";
+
+function resolveApiBase() {
+    if (configuredApiBase) {
+        return configuredApiBase;
+    }
+
+    if (window.location.protocol === "file:") {
+        return "http://127.0.0.1:8000";
+    }
+
+    // FastAPI serves the bundled dashboard under /dashboard/, so the API is
+    // on the same origin. Local dev servers also talk to the local API.
+    const { hostname, pathname } = window.location;
+    if (pathname.startsWith("/dashboard")) {
+        return "";
+    }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+        return "http://127.0.0.1:8000";
+    }
+
+    return DEFAULT_REMOTE_API;
+}
+
+const API_BASE = resolveApiBase().replace(/\/$/, "");
 
 function apiUrl(path) {
     return `${API_BASE}${path}`;
@@ -99,7 +121,9 @@ async function loadData() {
             MEDIUM: "orange",
             HIGH: "red",
         };
-        riskElement.style.color = riskColors[data.risk] || "#94a3b8";
+        riskElement.style.color = cameraOnline
+            ? riskColors[data.risk] || "#94a3b8"
+            : "#94a3b8";
 
         const alertElement = document.getElementById("alert");
         alertElement.style.color = data.alert === "No Alert" ? "lime" : "red";

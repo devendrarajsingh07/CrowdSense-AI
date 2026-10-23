@@ -5,14 +5,14 @@
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Leave blank for same-origin API, or set a separate backend URL. -->
+    <!-- Optional: override the API origin. When blank, script.js picks same-origin, local, or the deployed Render API. -->
     <meta name="crowdsense-api-base" content="">
 
     <title>CrowdSense AI</title>
 
     <link rel="stylesheet" href="style.css">
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 </head>
 
@@ -113,7 +113,7 @@
         <input
             type="file"
             id="videoFile"
-            accept=".mp4,.avi,.mov"
+            accept=".mp4,.avi,.mov,.mkv,.webm"
         >
 
         <button id="analyzeButton" type="button">

@@ -62,7 +62,7 @@ The database and its schema are created automatically. Press Escape in the detec
 
 - `CROWDSENSE_MAX_UPLOAD_MB` controls the video upload limit and defaults to `100`.
 - `CROWDSENSE_ALLOWED_ORIGINS` accepts a comma-separated list of frontend origins. It defaults to same/public access with no credentialed CORS requests.
-- When the frontend is hosted separately, set the `crowdsense-api-base` meta tag in `frontend/index.html` to the API origin. The bundled `/dashboard/` uses same-origin requests.
+- The dashboard picks its API automatically: same-origin when served from `/dashboard/`, `http://127.0.0.1:8000` on localhost or `file://`, and the deployed Render API everywhere else (e.g. Vercel). To point it somewhere else, set the `crowdsense-api-base` meta tag in `frontend/index.html`.
 
 Run the core unit tests with:
 
